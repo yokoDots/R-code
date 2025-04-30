@@ -1,0 +1,96 @@
+---
+title: "Arbustos y árboles del corredor urbano"
+author: "YC"
+date: "2025-02-20"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(tidyverse)
+library(sf)
+library(maps)
+library(randomcoloR)
+load(".RData")
+xespeciesWM_med <- xespeciesWM %>%
+  group_by(nombreCientifico) %>%
+  summarise(mean_cm = mean(cm, na.rm = TRUE))  
+xespeciesWM_sd <- xespeciesWM %>%
+  group_by(nombreComun) %>%
+  summarise(
+    mean_cm = mean(cm, na.rm = TRUE),
+    sd_cm = sd(cm, na.rm = TRUE))
+```
+## Los árboles y arbustos más frecuentes
+```{r frec}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::kable(head(sort(table(especiesWM$nombreComun), T), 10), caption = "Las especies mas frecuentes")
+knitr::kable(head(sort(table(especiesWM$nombreComun[
+  especiesWM$origen=="Nativa"]), T), 10), caption = "Nativas más frecuentes")
+knitr::kable(head(sort(table(especiesWM$nombreComun[
+  especiesWM$origen=="Introducida"]), T), 10),
+  caption = "Introducidas comunes")
+```
+## Algunos mapas con la distribución de los árboles
+```{r mapas, echo=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+invisible(st_read("waycham.kml", quiet = TRUE))
+mapita<- st_as_sf(xespeciesWM, coords = c('longitud', 'latitud'))
+mapita <- mapita%>%st_set_crs(4326)
+ggplot(mapita) +
+  ggspatial::annotation_map_tile(type = "osm",zoom = 15)+
+  geom_sf(aes(color=origen), size=0.5)+
+  scale_colour_viridis_d(alpha = 0.5)+
+  labs(title="Origen de los árboles y arbustos del corredor urbano")+
+  theme(axis.text =element_text(size = 5),
+  plot.title = element_text(size=8),
+  legend.title=element_text(size=7))
+  palette <- unname(distinctColorPalette(36))
+ggplot(mapita) + 
+  geom_sf(aes(color=nombreComun), size=0.5, alpha=0.8)+
+  labs(title="Arboles y arbustos del corredor
+        biológico urbano")+
+  theme(
+    axis.text = element_text(size = 4),
+    legend.direction = "horizontal",
+    legend.position = "bottom", 
+    legend.box = "horizontal",  
+    legend.text = element_text(size = 6), 
+    legend.title = element_text(size = 0))+
+  scale_colour_manual(values=palette)
+  ggplot(mapita) +
+  geom_sf(aes(color = nombreCientifico, 
+              size = cm), alpha = 0.4) +  
+  scale_colour_manual(values=palette)+
+  scale_size_continuous(range = c(0.2, 7)) +  
+  theme_minimal() +  
+  labs(size = "Altura (cm)",
+       title = "los diferentes arboles y arbustos por altura") +  
+  guides(color = "none")+
+  theme(axis.text =element_text(size = 5))
+```
+## Algunos datos
+```{r barras, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(xespeciesWM)+ 
+  geom_bar(aes(x=origen, fill=origen)) +
+  theme_classic() +
+  labs(y = "Número de árboles")+
+  scale_fill_viridis_d()
+ggplot(xespeciesWM)+ 
+  geom_bar(aes(x=nombreComun, fill=origen)) +
+  theme_classic() +
+  scale_fill_viridis_d()+
+  labs(y = "Conteo", x = "Nombre") +
+  theme(axis.text.x = 
+          element_text(angle = 80, 
+                       hjust = 1, size = 6)) 
+ggplot(xespeciesWM, aes(nombreComun, cm, fill=nombreComun)) + 
+  geom_violin(linewidth=0.2) +
+  geom_jitter(size=0.2, alpha=0.2)+
+  scale_color_viridis_d(option = "viridis")+
+  theme_classic() +
+  labs(y = "Altura (cm)", x = "Especie") +
+  theme(axis.text.x = element_text(angle = 80, size = 5,
+      hjust = 1))+
+  guides(fill= "none")
+```
