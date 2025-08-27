@@ -1,0 +1,411 @@
+---
+title: "A short data exploration of the Fungi Kingdom in BugSigDB"
+author: "YC"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  pdf_document:
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.align = "center", # Center images
+  fig.width = 5,      # Figure width
+  fig.height = 3.3,     # Figure height
+  out.width = "90%",   # Output width
+	message = FALSE,
+	warning = FALSE,
+	include = TRUE,
+	sanitize = TRUE  #special characters
+)
+```
+# Overview
+The fungi kingdom is an underrepresented taxon in microbiome studies (Perez and Johnson, 2013). Technical difficulties in sampling and identification, as well as a lack of quality controlled reference databases (Pérez, 2021) are some of the obstacles in including fungi in microbiome studies. Most studies have focused on fungal outgrowth when the host is compromised, with little known about the dynamics of the mycobiome during health (Huffnagle & Noverr, 2013).
+
+This exploratory analysis seeks to assess how fungi is represented in the BugSigDB database. Reporting on the most common taxa, distribution across body sites, increasing and decreasing signatures, and diversity based on presence/absence data across experiments.
+
+# Setup and Data Import
+Call libraries and import or load the BugSigDB database.
+```{r import_libraries_data, echo=TRUE}
+library(bugsigdbr)
+library(BugSigDBStats)
+library(tidyverse)     
+library(RColorBrewer) 
+# Import the full BugSigDB database
+#bsdb <- importBugSigDB(cache = FALSE) # from BugSigDB
+bsdb <- readRDS("bsdb.rds") # load from saved file
+```
+
+# Identifying Studies and Experiments with Fungi Taxa
+To identify the experiments that presented fungi taxa, values belonging to the Fungi kingdom were extracted from the `MetaPhlAn taxon names` column of the "bsdb" dataframe.
+
+```{r find_fungi_studies}
+# Get experiments that have fungi
+fungi <- grepl("k__Fungi", bsdb[["MetaPhlAn taxon names"]])
+# Subset 
+fungi <- bsdb[fungi, ]
+```
+## How many studies in BugSigDB have included fungi taxa in their analysis?
+```{r total_studies, echo=FALSE}
+nAll<-length(unique(bsdb$Study))
+nFungi<-length(unique(fungi$Study))
+
+study_data <- data.frame(
+  Category = c("All Studies", "Studies with Fungi"),
+  Count = c(nAll, nFungi))
+clr1 <- brewer.pal(3, "Pastel1")
+
+ggplot(study_data, aes(x = Category, y = Count, fill = Category)) +
+  geom_col(alpha = 0.8) +
+  scale_fill_manual(values = clr1) +
+  labs(y = "Number of Studies",
+       x = "BugSigDB studies") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  geom_text(aes(label = Count), vjust = -0.5)
+
+cat("The official BugSigDB release has a total of", length(unique(bsdb$Study)), "studies \nwith", nrow(bsdb), "experiments.", length(unique(fungi$Study)), "of these studies, with a total \nof", nrow(fungi), "experiments included the Fungi kingdom in their analysis.")
+
+all_exps<- subset(bsdb, Study %in% unique(fungi$Study))
+
+```
+# What sequencing type and method was used?
+Fungi do not have the 16Sr RNA gene, instead a specific DNA region is targeted.
+```{r sequencing_fungi, echo=FALSE}
+seq <- fungi %>%
+  select(PMID, Platform=`Sequencing platform`, Region = `16S variable region`, Type=`Sequencing type`)
+
+seq16S <-seq %>%
+  filter(Type %in% "16S") %>%
+    distinct(PMID, .keep_all = TRUE)
+print(seq16S)
+```
+There are 20 studies that should be reviewed since 16S is listed as part of the sequencing protocol. In many cases there was more than one type of library used and the results for both were grouped together. BugSigDB does not allow for more than one type to be inputted and this might be the issue.
+
+# What taxa do we find in the experiments that have fungi?
+Identify the taxonomic signatures in the experiments that contain fungi.
+
+```{r extract_signatures, echo=FALSE}
+# Get signatures as a list of vectors (using MetaPhlAn IDs)
+sigs <- getSignatures(fungi, tax.id.type = "metaphlan")
+# Find all MetaPhlAn taxon names that are fungi across all experiments
+onlyFungi<-grep("k__Fungi",
+           unlist(fungi$`MetaPhlAn taxon names`))
+onlyFungi<-unlist(fungi$`MetaPhlAn taxon names`)[onlyFungi] 
+# Clean the names: extract the lowest taxonomic level and remove the prefix
+onlyFungi <- onlyFungi %>%
+  sub(".*\\|", "", .) %>%    # Get everything after the last '|'
+  sub("^.{3}", "", .)        # Remove the first 3 characters (e.g., 's__')
+ print(head(onlyFungi, 10))
+
+```
+
+## What percentage of taxa in BugSigDB belong to the fungi kingdom?
+
+```{r plot_taxa, echo=FALSE}
+# Get unique taxa counts for comparison
+sigsFullDB <- getSignatures(bsdb, tax.id.type = "taxname")
+sigsName <- getSignatures(fungi,tax.id.type = "taxname")
+
+#table(unlist(sigsName))
+uAllSig <- length(unique(unlist(sigsFullDB))) # taxa in full DB
+uAFSig <- length(unique(unlist(sigsName))) # All taxa in fungi exps
+uOFSig <- length(unique(unlist(onlyFungi))) # Only fungal taxa
+
+taxa_counts <- data.frame(
+  Category = c("All taxa BSDB", "All taxa Fungi studies", "Fungi taxa"),
+  Count = c(uAllSig, uAFSig, uOFSig))
+
+clr2 <- brewer.pal(3, "Pastel2")
+ggplot(taxa_counts, aes(x = Category, y = Count, fill = Category)) +
+  geom_col(alpha = 0.8) +
+  scale_fill_manual(values = clr2) +
+  labs(title = "Number of Taxa by Category",
+       y = "Number Taxa",
+       x = "") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1)) +
+  geom_text(aes(label = Count), vjust = -0.5)
+
+cat("In the", uAllSig, "signatures curated in BugSigDB,", uAllSig - uOFSig, "taxa are classified as Bacteria, Archaebacteria, \n Eukaryota or Virus. Out of these,", uOFSig, "(", round(100 * uOFSig / uAllSig, 1), "%) belong to the Fungi kingdom.")
+
+```
+## Heattree for Bacteria, Archea, Fungi and Viruses found in fungi experiments
+```{r heattree, echo=FALSE}
+library(metacoder)
+metphNames<-data.frame(taxon=as.character(unlist(sigs)),
+                row.names = NULL)
+# add domain Prokaryota
+metphNames$taxon <- ifelse(grepl("d__Bac|d__Arc", 
+                metphNames$taxon),
+                paste0("d__Prokaryota|",metphNames$taxon),                  metphNames$taxon)
+
+metphNames<-metphNames %>%
+  separate(taxon,c("superkingdom", "kingdom", "phyla",
+                  "class","order","family","genus",
+                  "species"), "\\|")
+
+metphNames<-data.frame(sapply(metphNames,
+              \(x) sub("[dkpcofgs]__", "", x)))
+
+metphNames$lineage <- apply(metphNames, 1, paste,
+            collapse = ";")
+
+lineages<-data.frame(lineage=metphNames[,9])
+
+objF <- metacoder::parse_tax_data(lineages, 
+                    class_cols = "lineage", 
+                    class_sep = ";")
+set.seed(2)
+objF %>% 
+  metacoder::filter_taxa(drop_obs = TRUE, reassign_obs = TRUE)%>%
+  metacoder::heat_tree(node_label = taxon_names, 
+  node_size = (n_obs-1), node_color = n_obs)
+```
+## Unexpected taxa found
+```{r unexpected_fungi, echo=FALSE}
+unexpected_taxa <-metphNames[-9] %>%
+  filter(!(superkingdom %in% "Viruses"))%>%
+  filter(!(kingdom %in% c("Fungi", "Bacteria", "Archaea")))
+print(unexpected_taxa)
+```
+
+# Exploring Frequencies
+## Which are the most frequent taxa in BugSigDB fungi experiments?
+
+```{r top_fungi, echo=FALSE}
+# Create a frequency table of the cleaned fungal names
+fungi.table<-table(unlist(onlyFungi))
+freqFungi <- data.frame(taxon = names(fungi.table), 
+                  frequency = as.integer(fungi.table))
+f.max<-slice_max(freqFungi, order_by = frequency, n=20)
+
+ggplot(f.max, aes(reorder(taxon, -frequency), frequency))+
+  geom_col(fill="#89a5c3")+
+  theme_classic()+
+  coord_flip()+
+  ylab("Frequency") + xlab("Taxon")+
+  ggtitle("Fungi taxa with the highest frequencies")+
+  theme(text = element_text(size = 9))
+
+# Most frequent taxa in experiments with fungi
+all.table<-table(unlist(sigsName))
+freqAll <- data.frame(taxon = names(all.table), 
+              frequency = as.integer(all.table))
+# sum(freqAll$frequency)
+#get Fungi kingdom
+freqKingdom<-left_join(freqAll,freqFungi, by = "taxon")%>%
+  mutate(frequency.y = if_else(is.na(frequency.y),
+         "Other", "Fungi"))
+names(freqKingdom)<-c("Taxon", "Frequency", "Kingdom")
+a.max<-slice_max(freqKingdom, order_by = Frequency, n=20)
+
+# top 20 all taxa
+ggplot(a.max, aes(reorder(Taxon, -Frequency), Frequency, fill=Kingdom))+
+  geom_col()+
+  theme_classic()+
+  ylab("Frequency") + xlab("Taxon")+
+  ggtitle("Taxa with the highest frequencies in fungi experiments") +
+  theme(text = element_text(size = 9),
+        axis.text.x = element_text(angle = 90,
+        size = 7.5, vjust = 0.3, hjust=1))
+
+```
+## Increasing vs Deacresing signatures
+What taxa usually increases or decreases for the condition being tested?
+```{r up_down, echo=FALSE}
+# UP/DOWN #### 
+# taxon listed by experiment
+library(tidyr)
+
+# First, create a data frame with both columns
+up.down <- fungi %>%
+  dplyr::select(`Abundance in Group 1`, `MetaPhlAn taxon names`) %>%
+  unnest(`MetaPhlAn taxon names`) %>%
+  dplyr::rename(Direction = `Abundance in Group 1`,
+         Taxon = `MetaPhlAn taxon names`)
+up.down$Taxon <- up.down$Taxon %>%
+  sub(".*\\|", "", .) %>%    # Get everything after the last '|'
+  sub("^.{3}", "", .)        # Remove the first 3
+
+# top 10 increase or decrease
+up.down.10 <- up.down %>%
+  group_by(Direction, Taxon) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(Direction) %>%                       
+  slice_max(order_by = Count, n = 10)
+
+ggplot(up.down.10,
+  aes(x=Taxon, y = ifelse(Direction == "increased", 
+  Count, -Count)))+ 
+  geom_bar(stat="identity", position="identity", 
+  aes(fill=Direction)) +
+  ylab("Direction frequency")+
+  theme_classic()+
+  theme(axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(angle = 90, 
+        hjust = 1, vjust = 0.5, size = 8),
+        legend.key.size = unit(0.4, "cm"))+
+        coord_flip()
+
+```
+## Body Site Analysis
+What body sites were tested for fungi?
+### Body sites for the experiments that countain fungal taxa
+```{r body_sites, echo=FALSE}
+# Count experiments by body site
+Body <- fungi %>%
+  count(Site = `Body site`) %>%
+  arrange(desc(n)) %>%
+  dplyr::rename(Experiments = n)
+
+print(paste(length(unique(Body$Site)), " body sites were sampled in the fungi experiments."))
+# Plot the top body sites
+ggplot(Body[1:10,], aes(x = reorder(Site, Experiments), y = Experiments)) +
+  geom_col(fill = "lightsteelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Most frequent body sites in fungi experiments",
+       x = "Body Site",
+       y = "Number of Experiments") +
+  theme_minimal() +
+  geom_text(aes(label = Experiments), hjust = -0.2, size = 3)
+
+#All taxa in fungi experiments
+#use cbind because Metaphlan taxon is a list type
+taxaBody <- cbind(fungi$`Body site`, fungi$`MetaPhlAn taxon names` )
+taxaBody<-as.data.frame(taxaBody, row.names = NULL)
+names(taxaBody)<-c("Body", "Taxa")
+allTaxaBody<-taxaBody%>%unnest('Taxa') 
+fungiTaxaBody<-allTaxaBody[grep("k__Fungi", 
+               allTaxaBody$Taxa), ]
+
+allTaxaBody <- lapply(allTaxaBody,\(x) sub(".*\\|", "", x))
+allTaxaBody<-lapply(allTaxaBody,\(x) sub("\")", "", x))
+allTaxaBody$Taxa<-gsub("^.{0,3}", "", allTaxaBody$Taxa)
+#only fungi
+fungiTaxaBody<- lapply(fungiTaxaBody,\(x) sub(".*\\|", "", x))
+fungiTaxaBody<-lapply(fungiTaxaBody,\(x) sub("\")", "", x))
+fungiTaxaBody$Taxa<-gsub("^.{0,3}", "", fungiTaxaBody$Taxa)
+
+freqFungiBody<-data.frame(table(fungiTaxaBody$Body,fungiTaxaBody$Taxa))
+names(freqFungiBody)<- c("Site", "Taxon", "Frequency")
+freqFungiBody<-subset(freqFungiBody, Frequency>1)
+
+freqAllBody<-data.frame(table(allTaxaBody$Body,allTaxaBody$Taxa))
+names(freqAllBody)<- c("Site", "Taxon", "Frequency")
+freqAllBody<-subset(freqAllBody, Frequency>1)
+
+```
+## Significant fungal species often found in the human intestine (From Pérez, 2021).
+
+| Name                                                            | Observations/Comments                                                                                                                                                                                 | In BSDB                                                                         |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Candida albicans                                                | Most prevalent fungus in the gastrointestinal tract of human adults. Major inducers of Th17 cells.                                                                                                    | Is among top 20 frequent fungi species, not  frequently repeated in body sites. |
+| Candida glabrata                                                | Opportunistic pathogen. Unknown role(s) in the gut.                                                                                                                                                   | Listed in NCBI as Nakaseomyces glabratus. Not found in BSDB                     |
+| Candida parapsilosis                                            | Opportunistic pathogen. Unknown role(s) in the gut.                                                                                                                                                   | Is among top 20 frequent fungi species, not  frequently repeated in body sites. |
+| Rhodotorula mucilaginosa                                        | Higher abundance in neonates associated with childhood atopy ([Fujimura et al., 2016](https://www.sciencedirect.com/science/article/pii/S1438422121000199#bib0100)).                                  | Found in 1 study.                                                               |
+| Issatchenkia orientalis (Candida krusei or Pichia kudriavzevii) | Increased abundance in infants associated with atopic wheeze ([Arrieta et al., 2018](https://www.sciencedirect.com/science/article/pii/S1438422121000199#bib0015)).                                   | Pichia kudriavzevii in NCBI. Not found in BSDB                                  |
+| Malassezia restricta                                            | While often found in stool samples, this skin fungus may not be a true symbiont of the human gut ([Fiers et al., 2019](https://www.sciencedirect.com/science/article/pii/S1438422121000199#bib0090)). | Frequent in BSDB, found only in feces in decreasing signatures.                 |
+| Saccharomyces spp.                                              | While they are often found in stool samples (likely because they are components of many beverages and foods), these yeasts are not considered natural residents of the human gut.                     | Frequent in BSDB, found in feces.                                               |
+### Fungi taxa frequency by body site
+```{r echo=FALSE, fig.height=9, fig.width=7.2}
+ggplot(freqFungiBody, aes(x = Site, y = Taxon)) + 
+  geom_tile(aes(fill = Frequency)) + 
+  scale_fill_continuous(
+    low = "lightblue", 
+    high = "darkblue",
+    guide = guide_colorbar(barwidth = 0.5, barheight = 3.5)) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  # coord_fixed(ratio = 0.5) +  
+  ggtitle("Body sites and taxa with a frequency higher than 1") +
+  theme_classic()+
+  theme(
+    axis.text.y = element_text(size = 6),
+    axis.text.x = element_text(size =6, angle = 45, hjust = 1, vjust = 1), 
+    legend.title = element_text(size = 7), 
+    legend.text = element_text(size = 7)) 
+```
+### All taxa frequency by body site
+```{r echo=FALSE, fig.height=9, fig.width=7.2}
+ggplot(freqAllBody, aes(x = Site, y = Taxon)) + 
+  geom_tile(aes(fill = Frequency)) + 
+  scale_fill_continuous(
+    low = "lightblue", 
+    high = "darkblue",
+    guide = guide_colorbar(barwidth = 0.5, barheight = 3.5)) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  # coord_fixed(ratio = 0.5) +  
+  ggtitle("Body sites and taxa with a frequency higher than 1") +
+  theme_classic()+
+  theme(
+    axis.text.y = element_text(size = 6),
+    axis.text.x = element_text(size =6, angle = 45, hjust = 1, vjust = 1), 
+    legend.title = element_text(size = 7), 
+    legend.text = element_text(size = 7)) 
+```
+## What conditions were tested for in the experiments that include fungi?
+```{r echo=FALSE}
+conditionFungi <-matrix(unique(fungi$Condition), ncol =  3, byrow = TRUE)
+kableExtra::kable(conditionFungi, col.names =    rep("Condition tested",3))%>%
+    kableExtra::kable_styling(full_width = FALSE) %>%
+  kableExtra::column_spec(1:3, width = "3cm")
+
+```
+# What can presence/absence tell us about diveristy?
+## Diversity in Fungi taxa vs Other taxa
+```{r Diversity, fig.width=3, out.width="80%"}
+# reorganize for iNext
+incidence <- freqKingdom %>% 
+  add_count(Kingdom, name = "Samples") %>% 
+  dplyr::select(Kingdom, Samples, Frequency, Taxon, everything())
+
+incidence <- reshape2::dcast(incidence, formula = 
+            Taxon~Kingdom,      value.var = "Frequency", fill = 0)
+## convert to list
+incidence_list<-as.list(incidence)
+# Remove zeros from each element of the list
+incidence <- lapply(incidence_list, function(x) {
+  x[x > 0]})
+incidence<- incidence[-1]
+incidence$Fungi<-c(264, incidence$Fungi)
+incidence$Other<-c(264, incidence$Other)
+
+library(iNEXT)
+out.inc <- iNEXT(incidence, q=0, datatype="incidence_freq")
+
+ggiNEXT(out.inc, type=1, color.var="Assemblage") +
+theme_bw(base_size = 8) +
+theme(legend.position="None")
+
+ggiNEXT(out.inc, type=2, color.var="Assemblage") +
+ylim(c(0,1)) +
+theme_bw(base_size = 8) +
+theme(legend.position="None")
+
+ggiNEXT(out.inc, type=3, color.var ="Assemblage") +
+xlim(c(0,1)) +
+theme_bw(base_size = 18) +
+theme(legend.position="bottom",
+legend.title=element_blank(),
+text=element_text(size=18),
+legend.box = "vertical")
+
+```
+# Conclusions
+This short exploratory analysis suggests there is an under-representation of fungi compared to bacteria in BugSigDB. This could just be the reflection of an existing bias in microbiome research toward bacterial studies.
+
+At least 20 studies require a second revision to ensure the sequencing method is correctly input.
+
+A taxonomic exploration revealed some unexpected taxa, like the insecta class and Malpighiales order.
+
+The most frequent fungal taxa belong to the Malassezia genus, and include the phylum Ascomycota and genus Saccharomyces. The most frequent bacteria is Staphylococcus epidermis.
+
+The increasing/decreasing abundance patterns may suggest taxa that don't coexist or are antagonistic to each other. This analysis also highlighted there are studies that are missing this input.
+
+The studies took samples from several body sites and tested for different conditions. The frequencies for certain taxa seem to point these may be more prevelant in some body part than in others.
+
+The diversity analysis suggests that fungal diversity is poorly captured with current sampling efforts. However this analysis should be carried out with the same taxa level and not with a mix of taxa levels.
+
